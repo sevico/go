@@ -193,6 +193,7 @@ func bucketMask(b uint8) uintptr {
 // tophash calculates the tophash value for hash.
 func tophash(hash uintptr) uint8 {
 	top := uint8(hash >> (sys.PtrSize*8 - 8))
+	// 增加一个 minTopHash
 	if top < minTopHash {
 		top += minTopHash
 	}
@@ -314,6 +315,7 @@ func makemap(t *maptype, hint int, h *hmap) *hmap {
 
 	// Find the size parameter B which will hold the requested # of elements.
 	// For hint < 0 overLoadFactor returns false since hint < bucketCnt.
+	// 找到一个 B，使得 map 的装载因子在正常范围内
 	B := uint8(0)
 	for overLoadFactor(hint, B) {
 		B++
@@ -401,44 +403,69 @@ func mapaccess1(t *maptype, h *hmap, key unsafe.Pointer) unsafe.Pointer {
 	if msanenabled && h != nil {
 		msanread(key, t.key.size)
 	}
+	// 如果 h 什么都没有，返回零值
 	if h == nil || h.count == 0 {
 		if t.hashMightPanic() {
 			t.hasher(key, 0) // see issue 23734
 		}
 		return unsafe.Pointer(&zeroVal[0])
 	}
+	// 写和读冲突
 	if h.flags&hashWriting != 0 {
 		throw("concurrent map read and map write")
 	}
+	// 计算哈希值，并且加入 hash0 引入随机性
 	hash := t.hasher(key, uintptr(h.hash0))
+	// 比如 B=5，那 m 就是31，二进制是全 1
+	// 求 bucket num 时，将 hash 与 m 相与，
+	// 达到 bucket num 由 hash 的低 8 位决定的效果
 	m := bucketMask(h.B)
+	// b 就是 bucket 的地址
 	b := (*bmap)(add(h.buckets, (hash&m)*uintptr(t.bucketsize)))
+	// oldbuckets 不为 nil，说明发生了扩容
 	if c := h.oldbuckets; c != nil {
+		// 如果不是同 size 扩容（看后面扩容的内容）
+		// 对应条件 1 的解决方案
 		if !h.sameSizeGrow() {
 			// There used to be half as many buckets; mask down one more power of two.
+			// 新 bucket 数量是老的 2 倍
 			m >>= 1
 		}
+		// 求出 key 在老的 map 中的 bucket 位置
 		oldb := (*bmap)(add(c, (hash&m)*uintptr(t.bucketsize)))
+		// 如果 oldb 没有搬迁到新的 bucket
+		// 那就在老的 bucket 中寻找
 		if !evacuated(oldb) {
 			b = oldb
 		}
 	}
+	// 计算出高 8 位的 hash
+	// 相当于右移 56 位，只取高8位
 	top := tophash(hash)
 bucketloop:
+	// bucket 找完（还没找到），继续到 overflow bucket 里找
 	for ; b != nil; b = b.overflow(t) {
+		// 遍历 8 个 bucket
 		for i := uintptr(0); i < bucketCnt; i++ {
 			if b.tophash[i] != top {
+				// tophash 不匹配，继续
 				if b.tophash[i] == emptyRest {
 					break bucketloop
 				}
 				continue
 			}
+			// tophash 匹配，定位到 key 的位置
 			k := add(unsafe.Pointer(b), dataOffset+i*uintptr(t.keysize))
+			// key 是指针
 			if t.indirectkey() {
+				// 解引用
 				k = *((*unsafe.Pointer)(k))
 			}
+			// 如果 key 相等
 			if t.key.equal(key, k) {
+				// 定位到 value 的位置
 				e := add(unsafe.Pointer(b), dataOffset+bucketCnt*uintptr(t.keysize)+i*uintptr(t.elemsize))
+				// value 解引用
 				if t.indirectelem() {
 					e = *((*unsafe.Pointer)(e))
 				}
@@ -446,6 +473,8 @@ bucketloop:
 			}
 		}
 	}
+	// overflow bucket 也找完了，说明没有目标 key
+	// 返回零值
 	return unsafe.Pointer(&zeroVal[0])
 }
 

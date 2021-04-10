@@ -18,6 +18,7 @@ import "runtime/internal/atomic"
 //
 //go:notinheap
 type mcentral struct {
+	// 规格
 	spanclass spanClass
 
 	// partial and full contain two mspan sets: one of swept in-use

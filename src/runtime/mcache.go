@@ -36,7 +36,9 @@ type mcache struct {
 	// tinyAllocs is the number of tiny allocations performed
 	// by the P that owns this mcache.
 	tiny       uintptr
+	//下一个空闲内存所在的偏移量
 	tinyoffset uintptr
+	//内存分配器中分配的对象个数
 	tinyAllocs uintptr
 
 	// The rest is not accessed on every malloc.
@@ -90,6 +92,7 @@ func allocmcache() *mcache {
 		unlock(&mheap_.lock)
 	})
 	for i := range c.alloc {
+		//初始化后的 runtime.mcache 中的所有 runtime.mspan 都是空的占位符 emptymspan
 		c.alloc[i] = &emptymspan
 	}
 	c.nextSample = nextSample()

@@ -415,6 +415,7 @@ type mspan struct {
 	// ctz (count trailing zero) to use it directly.
 	// allocCache may contain bits beyond s.nelems; the caller must ignore
 	// these.
+	//分配位图，每一位代表一个块是否已分配
 	allocCache uint64
 
 	// allocBits and gcmarkBits hold pointers to a span's mark and

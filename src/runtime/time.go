@@ -18,6 +18,7 @@ type timer struct {
 	// If this timer is on a heap, which P's heap it is on.
 	// puintptr rather than *p to match uintptr in the versions
 	// of this struct defined in other packages.
+	//计时器所在的处理器 P 的指针地址。
 	pp puintptr
 
 	// Timer wakes up at when, and then at when+period, ... (period > 0 only)
@@ -25,16 +26,23 @@ type timer struct {
 	// a well-behaved function and not block.
 	//
 	// when must be positive on an active timer.
-	when   int64
+	//计时器被唤醒的时间
+	when int64
+	//计时器再次被唤醒的时间（when+period）
 	period int64
+	//回调函数，每次在计时器被唤醒时都会调用。
 	f      func(interface{}, uintptr)
+	//回调函数的参数，每次在计时器被唤醒时会将该参数项传入回调函数 f 中
 	arg    interface{}
+	//回调函数的参数，该参数仅在 netpoll 的应用场景下使用
 	seq    uintptr
 
 	// What to set the when field to in timerModifiedXX status.
+	//当计时器状态为 timerModifiedXX 时，将会使用 nextwhen 的值设置到 where 字段上
 	nextwhen int64
 
 	// The status field holds one of the values below.
+	//时器的当前状态值，计时器本身包含大量的枚举标识
 	status uint32
 }
 
