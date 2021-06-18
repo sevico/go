@@ -632,6 +632,7 @@ func (h *mheap) sysAlloc(n uintptr) (v unsafe.Pointer, size uintptr) {
 	n = alignUp(n, heapArenaBytes)
 
 	// First, try the arena pre-reservation.
+	// 在预先保留的内存中申请一块可以使用的空间
 	v = h.arena.alloc(n, heapArenaBytes, &memstats.heap_sys)
 	if v != nil {
 		size = n
@@ -639,6 +640,7 @@ func (h *mheap) sysAlloc(n uintptr) (v unsafe.Pointer, size uintptr) {
 	}
 
 	// Try to grow the heap at a hint address.
+	// 根据页堆的arenaHints在目标地址上尝试扩容
 	for h.arenaHints != nil {
 		hint := h.arenaHints
 		p := hint.addr
@@ -652,6 +654,7 @@ func (h *mheap) sysAlloc(n uintptr) (v unsafe.Pointer, size uintptr) {
 			// Outside addressable heap. Can't use.
 			v = nil
 		} else {
+			// 从操作系统中申请内存
 			v = sysReserve(unsafe.Pointer(p), n)
 		}
 		if p == uintptr(v) {
@@ -727,6 +730,7 @@ func (h *mheap) sysAlloc(n uintptr) (v unsafe.Pointer, size uintptr) {
 
 mapped:
 	// Create arena metadata.
+	// 初始化一个heapArena来管理刚刚申请的内存
 	for ri := arenaIndex(uintptr(v)); ri <= arenaIndex(uintptr(v)+size-1); ri++ {
 		l2 := h.arenas[ri.l1()]
 		if l2 == nil {
@@ -768,6 +772,7 @@ mapped:
 			// double the array each time, this can lead
 			// to at most 2x waste.
 		}
+		// 将创建heapArena放入到arenas列表中
 		h.allArenas = h.allArenas[:len(h.allArenas)+1]
 		h.allArenas[len(h.allArenas)-1] = ri
 
@@ -840,6 +845,7 @@ var zerobase uintptr
 // nextFreeFast returns the next free object if one is quickly available.
 // Otherwise it returns 0.
 func nextFreeFast(s *mspan) gclinkptr {
+	// 获取allocCache二进制中0的个数
 	theBit := sys.Ctz64(s.allocCache) // Is there a free object in the allocCache?
 	if theBit < 64 {
 		result := s.freeindex + uintptr(theBit)
@@ -869,6 +875,7 @@ func nextFreeFast(s *mspan) gclinkptr {
 func (c *mcache) nextFree(spc spanClass) (v gclinkptr, s *mspan, shouldhelpgc bool) {
 	s = c.alloc[spc]
 	shouldhelpgc = false
+	// 当前span中找到合适的index索引
 	freeIndex := s.nextFreeIndex()
 	if freeIndex == s.nelems {
 		// The span is full.
@@ -876,17 +883,18 @@ func (c *mcache) nextFree(spc spanClass) (v gclinkptr, s *mspan, shouldhelpgc bo
 			println("runtime: s.allocCount=", s.allocCount, "s.nelems=", s.nelems)
 			throw("s.allocCount != s.nelems && freeIndex == s.nelems")
 		}
+		// 从 mcentral 中获取可用的span，并替换掉当前 mcache里面的span
 		c.refill(spc)
 		shouldhelpgc = true
 		s = c.alloc[spc]
-
+		// 再次到新的span里面查找合适的index
 		freeIndex = s.nextFreeIndex()
 	}
 
 	if freeIndex >= s.nelems {
 		throw("freeIndex is not valid")
 	}
-
+	// 计算出来内存地址，并更新span的属性
 	v = gclinkptr(freeIndex*s.elemsize + s.base())
 	s.allocCount++
 	if uintptr(s.allocCount) > s.nelems {
@@ -971,14 +979,17 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 
 	shouldhelpgc := false
 	dataSize := size
+	// 获取mcache，用于处理微对象和小对象的分配
 	c := getMCache()
 	if c == nil {
 		throw("mallocgc called without a P or outside bootstrapping")
 	}
 	var span *mspan
 	var x unsafe.Pointer
+	// 表示对象是否包含指针，true表示对象里没有指针
 	noscan := typ == nil || typ.ptrdata == 0
 	if size <= maxSmallSize {
+		// maxTinySize= 16 bytes
 		if noscan && size < maxTinySize {
 			// Tiny allocator.
 			//
@@ -1011,6 +1022,7 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 			// reduces heap size by ~20%.
 			off := c.tinyoffset
 			// Align tiny pointer for required (conservative) alignment.
+			// 指针内存对齐
 			if size&7 == 0 {
 				off = alignUp(off, 8)
 			} else if sys.PtrSize == 4 && size == 12 {
@@ -1026,26 +1038,33 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 			} else if size&1 == 0 {
 				off = alignUp(off, 2)
 			}
+			// 判断指针大小相加是否超过16（溢出判断)
 			if off+size <= maxTinySize && c.tiny != 0 {
 				// The object fits into existing tiny block.
+				// 获取tiny空闲内存的起始位置
 				x = unsafe.Pointer(c.tiny + off)
+				// 重设偏移量
 				c.tinyoffset = off + size
+				// 统计数量
 				c.tinyAllocs++
 				mp.mallocing = 0
 				releasem(mp)
 				return x
 			}
 			// Allocate a new maxTinySize block.
+			// 重新分配一个内存块
 			span = c.alloc[tinySpanClass]
 			v := nextFreeFast(span)
 			if v == 0 {
 				v, span, shouldhelpgc = c.nextFree(tinySpanClass)
 			}
 			x = unsafe.Pointer(v)
+			//将申请的内存块全置为 0
 			(*[2]uint64)(x)[0] = 0
 			(*[2]uint64)(x)[1] = 0
 			// See if we need to replace the existing tiny block with the new one
 			// based on amount of remaining free space.
+			// 如果申请的内存块用不完，则将剩下的给 tiny，用 tinyoffset 记录分配了多少。
 			if size < c.tinyoffset || c.tiny == 0 {
 				c.tiny = uintptr(x)
 				c.tinyoffset = size
@@ -1053,16 +1072,22 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 			size = maxTinySize
 		} else {
 			var sizeclass uint8
+			//计算 sizeclass
+			// smallSizeMax=1024
 			if size <= smallSizeMax-8 {
+				// smallSizeDiv=8
 				sizeclass = size_to_class8[divRoundUp(size, smallSizeDiv)]
 			} else {
+				// largeSizeDiv=128,smallSizeMax = 1024
 				sizeclass = size_to_class128[divRoundUp(size-smallSizeMax, largeSizeDiv)]
 			}
 			size = uintptr(class_to_size[sizeclass])
 			spc := makeSpanClass(sizeclass, noscan)
 			span = c.alloc[spc]
+			//从对应的 span 里面分配一个 object
 			v := nextFreeFast(span)
 			if v == 0 {
+				// mcache不够用了，则从 mcentral 申请内存到 mcache
 				v, span, shouldhelpgc = c.nextFree(spc)
 			}
 			x = unsafe.Pointer(v)
@@ -1070,7 +1095,7 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 				memclrNoHeapPointers(unsafe.Pointer(v), size)
 			}
 		}
-	} else {
+	} else {  // 大于 32 Kb 的内存分配,通过 mheap 分配
 		shouldhelpgc = true
 		span = c.allocLarge(size, needzero, noscan)
 		span.freeindex = 1
@@ -1116,6 +1141,7 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 	// All slots hold nil so no scanning is needed.
 	// This may be racing with GC so do it atomically if there can be
 	// a race marking the bit.
+	// 在 GC 期间分配的新对象都会被标记成黑色
 	if gcphase != _GCoff {
 		gcmarknewobject(span, uintptr(x), size, scanSize)
 	}
@@ -1171,6 +1197,7 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 // compiler (both frontend and SSA backend) knows the signature
 // of this function
 func newobject(typ *_type) unsafe.Pointer {
+	//size表示该对象的大小
 	return mallocgc(typ.size, typ, true)
 }
 

@@ -196,6 +196,9 @@ needtls:
 	CALL	runtime·abort(SB)
 ok:
 	// set the per-goroutine and per-mach "registers"
+	// 程序刚启动的时候必定有一个线程启动（主线程）
+    // 将当前的栈和资源保存在g0
+    // 将该线程保存在m0
 	get_tls(BX)
 	LEAQ	runtime·g0(SB), CX
 	MOVQ	CX, g(BX)

@@ -675,6 +675,8 @@ func schedinit() {
 
 	lock(&sched.lock)
 	sched.lastpoll = uint64(nanotime())
+	// 确认P的个数
+	// 默认等于cpu个数，可以通过GOMAXPROCS环境变量更改
 	procs := ncpu
 	if n, ok := atoi32(gogetenv("GOMAXPROCS")); ok && n > 0 {
 		procs = n
@@ -1179,6 +1181,7 @@ func startTheWorldWithSema(emitTraceEvent bool) int64 {
 
 	mp := acquirem() // disable preemption because it can be holding p in a local var
 	if netpollinited() {
+		//从网络轮询器中获取待处理的任务并加入全局队列
 		list := netpoll(0) // non-blocking
 		injectglist(&list)
 	}
@@ -1189,6 +1192,7 @@ func startTheWorldWithSema(emitTraceEvent bool) int64 {
 		procs = newprocs
 		newprocs = 0
 	}
+	// 扩容或者缩容全局的处理器
 	p1 := procresize(procs)
 	sched.gcwaiting = 0
 	if sched.sysmonwait != 0 {
@@ -1198,7 +1202,7 @@ func startTheWorldWithSema(emitTraceEvent bool) int64 {
 	unlock(&sched.lock)
 
 	worldStarted()
-
+	//调用 runtime.notewakeup 或者 runtime.newm 依次唤醒处理器或者为处理器创建新的线程
 	for p1 != nil {
 		p := p1
 		p1 = p1.link.ptr()
@@ -1225,6 +1229,7 @@ func startTheWorldWithSema(emitTraceEvent bool) int64 {
 	// Wakeup an additional proc in case we have excessive runnable goroutines
 	// in local queues or in the global queue. If we don't, the proc will park itself.
 	// If we have lots of excessive work, resetspinning will unpark additional procs as necessary.
+	//如果当前待处理的 Goroutine 数量过多，创建额外的处理器辅助完成任务；
 	wakep()
 
 	releasem(mp)
@@ -2754,6 +2759,7 @@ stop:
 	// We have nothing to do. If we're in the GC mark phase, can
 	// safely scan and blacken objects, and have work to do, run
 	// idle-time marking rather than give up the P.
+	//空闲的处理器执行垃圾收集以加速该过程：
 	if gcBlackenEnabled != 0 && gcMarkWorkAvailable(_p_) {
 		node := (*gcBgMarkWorkerNode)(gcBgMarkWorkerPool.pop())
 		if node != nil {

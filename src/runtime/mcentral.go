@@ -107,18 +107,21 @@ func (c *mcentral) cacheSpan() *mspan {
 	var s *mspan
 
 	// Try partial swept spans first.
+	// 从清理过的、包含空闲空间的spanSet结构中查找可以使用的内存管理单元
 	if s = c.partialSwept(sg).pop(); s != nil {
 		goto havespan
 	}
 
 	// Now try partial unswept spans.
 	for ; spanBudget >= 0; spanBudget-- {
+		// 从未被清理过的、有空闲对象的spanSet查找可用的span
 		s = c.partialUnswept(sg).pop()
 		if s == nil {
 			break
 		}
 		if atomic.Load(&s.sweepgen) == sg-2 && atomic.Cas(&s.sweepgen, sg-2, sg-1) {
 			// We got ownership of the span, so let's sweep it and use it.
+			// 找到要回收的span，触发sweep进行清理
 			s.sweep(true)
 			goto havespan
 		}
@@ -132,6 +135,7 @@ func (c *mcentral) cacheSpan() *mspan {
 	// Now try full unswept spans, sweeping them and putting them into the
 	// right list if we fail to get a span.
 	for ; spanBudget >= 0; spanBudget-- {
+		// 获取未被清理的、不包含空闲空间的spanSet查找可用的span
 		s = c.fullUnswept(sg).pop()
 		if s == nil {
 			break
@@ -156,6 +160,7 @@ func (c *mcentral) cacheSpan() *mspan {
 	}
 
 	// We failed to get a span from the mcentral so get one from mheap.
+	// 从堆中申请新的内存管理单元
 	s = c.grow()
 	if s == nil {
 		return nil
@@ -173,6 +178,7 @@ havespan:
 	freeByteBase := s.freeindex &^ (64 - 1)
 	whichByte := freeByteBase / 8
 	// Init alloc bits cache.
+	// 更新allocCache
 	s.refillAllocCache(whichByte)
 
 	// Adjust the allocCache so that s.freeindex corresponds to the low bit in
@@ -227,9 +233,10 @@ func (c *mcentral) uncacheSpan(s *mspan) {
 
 // grow allocates a new empty span from the heap and initializes it for c's size class.
 func (c *mcentral) grow() *mspan {
+	// 获取待分配的页数
 	npages := uintptr(class_to_allocnpages[c.spanclass.sizeclass()])
 	size := uintptr(class_to_size[c.spanclass.sizeclass()])
-
+	// 获取新的span
 	s := mheap_.alloc(npages, c.spanclass, true)
 	if s == nil {
 		return nil
@@ -238,6 +245,7 @@ func (c *mcentral) grow() *mspan {
 	// Use division by multiplication and shifts to quickly compute:
 	// n := (npages << _PageShift) / size
 	n := s.divideByElemSize(npages << _PageShift)
+	// 初始化limit
 	s.limit = s.base() + size*n
 	heapBitsForAddr(s.base()).initSpan(s)
 	return s

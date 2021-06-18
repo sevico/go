@@ -149,8 +149,8 @@ type mheap struct {
 	//
 	// In general, this is a two-level mapping consisting of an L1
 	// map and possibly many L2 maps. This saves space when there
-	// are a huge number of arena frames. However, on many
-	// platforms (even 64-bit), arenaL1Bits is 0, making this
+	//	// are a huge number of arena frames. However, on many
+	//	// platforms (even 64-bit), arenaL1Bits is 0, making this
 	// effectively a single-level map. In this case, arenas[0]
 	// will never be nil.
 	arenas [1 << arenaL1Bits]*[1 << arenaL2Bits]*heapArena
@@ -903,8 +903,10 @@ func (h *mheap) alloc(npages uintptr, spanclass spanClass, needzero bool) *mspan
 		// To prevent excessive heap growth, before allocating n pages
 		// we need to sweep and reclaim at least n pages.
 		if h.sweepdone == 0 {
+			// 回收一部分内存
 			h.reclaim(npages)
 		}
+		// 进行内存分配
 		s = h.allocSpan(npages, spanAllocHeap, spanclass)
 	})
 
@@ -1133,6 +1135,7 @@ func (h *mheap) allocSpan(npages uintptr, typ spanAllocType, spanclass spanClass
 	// The page cache does not support aligned allocations, so we cannot use
 	// it if we need to provide a physical page aligned stack allocation.
 	pp := gp.m.p.ptr()
+	// 申请的内存比较小,尝试从pcache申请内存
 	if !needPhysPageAlign && pp != nil && npages < pageCachePages/4 {
 		c := &pp.pcache
 
@@ -1163,16 +1166,19 @@ func (h *mheap) allocSpan(npages uintptr, typ spanAllocType, spanclass spanClass
 		// Overallocate by a physical page to allow for later alignment.
 		npages += physPageSize / pageSize
 	}
-
+	// 内存比较大或者线程的页缓存中内存不足，从mheap的pages上获取内存
 	if base == 0 {
 		// Try to acquire a base address.
 		base, scav = h.pages.alloc(npages)
+		// 内存也不够，那么进行扩容
 		if base == 0 {
 			if !h.grow(npages) {
 				unlock(&h.lock)
 				return nil
 			}
+			// 重新申请内存
 			base, scav = h.pages.alloc(npages)
+			// 内存不足，抛出异常
 			if base == 0 {
 				throw("grew heap, but no adequate free space found")
 			}
@@ -1181,6 +1187,7 @@ func (h *mheap) allocSpan(npages uintptr, typ spanAllocType, spanclass spanClass
 	if s == nil {
 		// We failed to get an mspan earlier, so grab
 		// one now that we have the heap lock.
+		// 分配一个mspan对象
 		s = h.allocMSpanLocked()
 	}
 
@@ -1205,6 +1212,7 @@ func (h *mheap) allocSpan(npages uintptr, typ spanAllocType, spanclass spanClass
 HaveSpan:
 	// At this point, both s != nil and base != 0, and the heap
 	// lock is no longer held. Initialize the span.
+	// 设置参数初始化
 	s.init(base, npages)
 	if h.allocNeedsZero(base, npages) {
 		s.needzero = 1
@@ -1291,6 +1299,7 @@ HaveSpan:
 	// this thread until pointers into the span are published (and
 	// we execute a publication barrier at the end of this function
 	// before that happens) or pageInUse is updated.
+	// 建立mheap与mspan之间的联系
 	h.setSpans(s.base(), npages, s)
 
 	if !typ.manual() {
@@ -1332,6 +1341,7 @@ func (h *mheap) grow(npage uintptr) bool {
 	// and is otherwise unrelated to h.curArena.base.
 	end := h.curArena.base + ask
 	nBase := alignUp(end, physPageSize)
+	// 内存不够则调用sysAlloc申请内存
 	if nBase > h.curArena.end || /* overflow */ end < h.curArena.base {
 		// Not enough room in the current arena. Allocate more
 		// arena space. This may not be contiguous with the
@@ -1341,7 +1351,7 @@ func (h *mheap) grow(npage uintptr) bool {
 			print("runtime: out of memory: cannot allocate ", ask, "-byte block (", memstats.heap_sys, " in use)\n")
 			return false
 		}
-
+		// 重新设置curArena的值
 		if uintptr(av) == h.curArena.end {
 			// The new space is contiguous with the old
 			// space, so just extend the current space.

@@ -1017,6 +1017,7 @@ func gcDrain(gcw *gcWork, flags gcDrainFlags) {
 			if job >= work.markrootJobs {
 				break
 			}
+			//扫描缓存、数据段、存放全局变量和静态变量的 BSS 段以及 Goroutine 的栈内存
 			markroot(gcw, job)
 			if check != nil && check() {
 				goto done
@@ -1051,6 +1052,7 @@ func gcDrain(gcw *gcWork, flags gcDrainFlags) {
 			// Unable to get work.
 			break
 		}
+		//传入的位置开始扫描，扫描期间会调用 runtime.greyobject 为找到的活跃对象上色
 		scanobject(b, gcw)
 
 		// Flush background scan work credit to the global
